@@ -372,6 +372,94 @@ function resolveLazy(lazyType: any) {
   return init(payload);
 }
 
+// Uses a modified greedy patience sort to recover positions of numbers
+// that do not belong to the longest increasing subsequence (LIS).
+// In case of multiple LIS of the same length, this algorithm will
+// prefer higher numbers in each "tail" it tracks.
+//
+// Time complexity:
+// Best case: O(N) - all numbers are increasing or decreasing
+// Worst case: O(N log N) - all numbers are random
+//
+// Example:
+// findPositionsNotInLIS([4, 1, 8, 2, 3, 5, 7])
+// returns [2 (index of 8), 0 (index of 4)]
+function findPositionsNotInLIS(numbers: Array<number>): Array<number> {
+  if (numbers.length === 0) {
+    return [];
+  }
+
+  const tails = [numbers[0]];
+  const lengths = [1];
+
+  for (let i = 1; i < numbers.length; i++) {
+    const num = numbers[i];
+    if (num >= tails[tails.length - 1]) {
+      // Extend the current increasing subsequence.
+      // This branch optimizes for all numbers increasing.
+      tails.push(num);
+      lengths.push(tails.length);
+    } else if (num <= tails[0]) {
+      // Start a new increasing subsequence.
+      // This branch optimizes for all numbers decreasing.
+      tails[0] = num;
+      lengths.push(1);
+    } else {
+      // Extend a previous but not the longest subsequence (yet).
+      // Uses binary search to find the right position to extend.
+      let low = 1;
+      let high = tails.length - 1; // non-inclusive
+
+      while (low < high) {
+        // Unsigned right shift by 1 to divide by 2, this will also floor the result.
+        const mid = (low + high) >>> 1;
+        if (tails[mid] < num) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      tails[low] = num;
+      lengths.push(low + 1);
+    }
+  }
+
+  let currLen = tails.length; // LIS length
+  const nonLISPositions: Array<number> = [];
+  for (let i = numbers.length - 1; i >= 0; i--) {
+    if (lengths[i] === currLen && currLen > 0) {
+      currLen--;
+    } else {
+      nonLISPositions.push(i);
+    }
+  }
+
+  return nonLISPositions;
+}
+
+// Marks reused fibers as placed if their old indices in the new list
+// are not part of the Longest Increasing Subsequence. The goal of this
+// is to derive the maximum set of fibers that can remain in their current
+// positions and not mark them as "moves".
+function placeReusedFibers(reusedFibers: Array<Fiber>): void {
+  if (reusedFibers.length < 2) {
+    // If there is a single reused fiber it indicates that all other fibers
+    // are new and placed before or after it. It can stay in place.
+    return;
+  }
+
+  const oldIndices: Array<number> = [];
+  for (let i = 0; i < reusedFibers.length; i++) {
+    oldIndices.push(reusedFibers[i].alternate.index);
+  }
+
+  const reusedFiberIndicesToPlace = findPositionsNotInLIS(oldIndices);
+  for (let i = 0; i < reusedFiberIndicesToPlace.length; i++) {
+    const indexToPlace = reusedFiberIndicesToPlace[i];
+    reusedFibers[indexToPlace].flags |= Placement | PlacementDEV;
+  }
+}
+
 type ChildReconciler = (
   returnFiber: Fiber,
   currentFirstChild: Fiber | null,
@@ -450,31 +538,27 @@ function createChildReconciler(
 
   function placeChild(
     newFiber: Fiber,
-    lastPlacedIndex: number,
     newIndex: number,
-  ): number {
+    reusedFibers: Array<Fiber>,
+  ) {
     newFiber.index = newIndex;
     if (!shouldTrackSideEffects) {
       // During hydration, the useId algorithm needs to know which fibers are
       // part of a list of children (arrays, iterators).
       newFiber.flags |= Forked;
-      return lastPlacedIndex;
+      return;
     }
+
     const current = newFiber.alternate;
     if (current !== null) {
-      const oldIndex = current.index;
-      if (oldIndex < lastPlacedIndex) {
-        // This is a move.
-        newFiber.flags |= Placement | PlacementDEV;
-        return lastPlacedIndex;
-      } else {
-        // This item can stay in place.
-        return oldIndex;
-      }
+      // This is an update. We will calculate if this fiber needs placement
+      // after a complete pass. It will be marked placed only if its alternate's
+      // old index in the new list does not belong to the longest increasing
+      // subsequence among all old indices.
+      reusedFibers.push(newFiber);
     } else {
       // This is an insertion.
       newFiber.flags |= Placement | PlacementDEV;
-      return lastPlacedIndex;
     }
   }
 
@@ -1132,14 +1216,13 @@ function createChildReconciler(
 
     // If you change this code, also update reconcileChildrenIterator() which
     // uses the same algorithm.
-
     let knownKeys: Set<string> | null = null;
 
+    const reusedFibers: Array<Fiber> = [];
     let resultingFirstChild: Fiber | null = null;
     let previousNewFiber: Fiber | null = null;
 
     let oldFiber = currentFirstChild;
-    let lastPlacedIndex = 0;
     let newIdx = 0;
     let nextOldFiber = null;
     for (; oldFiber !== null && newIdx < newChildren.length; newIdx++) {
@@ -1182,7 +1265,9 @@ function createChildReconciler(
           deleteChild(returnFiber, oldFiber);
         }
       }
-      lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+
+      placeChild(newFiber, newIdx, reusedFibers);
+
       if (previousNewFiber === null) {
         // TODO: Move out of the loop. This only happens for the first run.
         resultingFirstChild = newFiber;
@@ -1200,6 +1285,7 @@ function createChildReconciler(
     if (newIdx === newChildren.length) {
       // We've reached the end of the new children. We can delete the rest.
       deleteRemainingChildren(returnFiber, oldFiber);
+      placeReusedFibers(reusedFibers);
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
         pushTreeFork(returnFiber, numberOfForks);
@@ -1223,7 +1309,7 @@ function createChildReconciler(
             knownKeys,
           );
         }
-        lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+        placeChild(newFiber, newIdx, reusedFibers);
         if (previousNewFiber === null) {
           // TODO: Move out of the loop. This only happens for the first run.
           resultingFirstChild = newFiber;
@@ -1232,6 +1318,7 @@ function createChildReconciler(
         }
         previousNewFiber = newFiber;
       }
+      placeReusedFibers(reusedFibers);
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
         pushTreeFork(returnFiber, numberOfForks);
@@ -1271,7 +1358,7 @@ function createChildReconciler(
             );
           }
         }
-        lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+        placeChild(newFiber, newIdx, reusedFibers);
         if (previousNewFiber === null) {
           resultingFirstChild = newFiber;
         } else {
@@ -1287,6 +1374,7 @@ function createChildReconciler(
       existingChildren.forEach(child => deleteChild(returnFiber, child));
     }
 
+    placeReusedFibers(reusedFibers);
     if (getIsHydrating()) {
       const numberOfForks = newIdx;
       pushTreeFork(returnFiber, numberOfForks);
@@ -1302,7 +1390,6 @@ function createChildReconciler(
   ): Fiber | null {
     // This is the same implementation as reconcileChildrenArray(),
     // but using the iterator instead.
-
     const iteratorFn = getIteratorFn(newChildrenIterable);
 
     if (typeof iteratorFn !== 'function') {
@@ -1426,11 +1513,11 @@ function createChildReconciler(
       throw new Error('An iterable object provided no iterator.');
     }
 
+    const reusedFibers: Array<Fiber> = [];
     let resultingFirstChild: Fiber | null = null;
     let previousNewFiber: Fiber | null = null;
 
     let oldFiber = currentFirstChild;
-    let lastPlacedIndex = 0;
     let newIdx = 0;
     let nextOldFiber = null;
 
@@ -1476,7 +1563,7 @@ function createChildReconciler(
           deleteChild(returnFiber, oldFiber);
         }
       }
-      lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+      placeChild(newFiber, newIdx, reusedFibers);
       if (previousNewFiber === null) {
         // TODO: Move out of the loop. This only happens for the first run.
         resultingFirstChild = newFiber;
@@ -1494,6 +1581,7 @@ function createChildReconciler(
     if (step.done) {
       // We've reached the end of the new children. We can delete the rest.
       deleteRemainingChildren(returnFiber, oldFiber);
+      placeReusedFibers(reusedFibers);
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
         pushTreeFork(returnFiber, numberOfForks);
@@ -1517,7 +1605,7 @@ function createChildReconciler(
             knownKeys,
           );
         }
-        lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+        placeChild(newFiber, newIdx, reusedFibers);
         if (previousNewFiber === null) {
           // TODO: Move out of the loop. This only happens for the first run.
           resultingFirstChild = newFiber;
@@ -1526,6 +1614,7 @@ function createChildReconciler(
         }
         previousNewFiber = newFiber;
       }
+      placeReusedFibers(reusedFibers);
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
         pushTreeFork(returnFiber, numberOfForks);
@@ -1565,7 +1654,7 @@ function createChildReconciler(
             );
           }
         }
-        lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+        placeChild(newFiber, newIdx, reusedFibers);
         if (previousNewFiber === null) {
           resultingFirstChild = newFiber;
         } else {
@@ -1580,7 +1669,7 @@ function createChildReconciler(
       // to add them to the deletion list.
       existingChildren.forEach(child => deleteChild(returnFiber, child));
     }
-
+    placeReusedFibers(reusedFibers);
     if (getIsHydrating()) {
       const numberOfForks = newIdx;
       pushTreeFork(returnFiber, numberOfForks);
