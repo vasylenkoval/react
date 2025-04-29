@@ -75,8 +75,13 @@ export const enableScrollEndPolyfill = true;
 export const enableSuspenseyImages = false;
 export const enableFizzBlockingRender = true;
 export const enableSrcObject = false;
+<<<<<<< HEAD
 export const enableHydrationChangeEvent = false;
 export const enableDefaultTransitionIndicator = false;
+=======
+export const enableGranularChildrenPlacement = false;
+export const enablePlacementCommitCache = false;
+>>>>>>> dff420f35 (Add feature flags for granular children placement and placement commit cache. Also refactor placement commit cache to be passed through arguments.)
 export const ownerStackLimit = 1e4;
 
 export const enableFragmentRefs = false;
