@@ -75,8 +75,8 @@ export const enableSrcObject = false;
 export const enableHydrationChangeEvent = false;
 export const enableDefaultTransitionIndicator = false;
 export const enableFragmentRefs = false;
-export const enableGranularChildrenPlacement = false;
-export const enablePlacementCommitCache = false;
+export const enableGranularChildrenMoves = true;
+export const enableChildrenTerminalPlacementTracking = true;
 export const ownerStackLimit = 1e4;
 
 // Flow magic to verify the exports of this file match the original version.

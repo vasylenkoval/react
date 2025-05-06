@@ -49,7 +49,7 @@ import {
   enableAsyncIterableChildren,
   disableLegacyMode,
   enableFragmentRefs,
-  enableGranularChildrenPlacement,
+  enableGranularChildrenMoves,
 } from 'shared/ReactFeatureFlags';
 
 import {
@@ -450,87 +450,22 @@ function createChildReconciler(
     return clone;
   }
 
-  function placeChild(
-    newFiber: Fiber,
-    lastPlacedIndex: number,
-    newIndex: number,
-  ): number {
-    newFiber.index = newIndex;
-    if (!shouldTrackSideEffects) {
-      // During hydration, the useId algorithm needs to know which fibers are
-      // part of a list of children (arrays, iterators).
-      newFiber.flags |= Forked;
-      return lastPlacedIndex;
-    }
-    const current = newFiber.alternate;
-    if (current !== null) {
-      const oldIndex = current.index;
-      if (oldIndex < lastPlacedIndex) {
-        // This is a move.
-        newFiber.flags |= Placement | PlacementDEV;
-        return lastPlacedIndex;
-      } else {
-        // This item can stay in place.
-        return oldIndex;
-      }
-    } else {
-      // This is an insertion.
-      newFiber.flags |= Placement | PlacementDEV;
-      return lastPlacedIndex;
-    }
-  }
-
-  function placeSingleChild(newFiber: Fiber): Fiber {
-    // This is simpler for the single child case. We only need to do a
-    // placement for inserting new children.
-    if (shouldTrackSideEffects && newFiber.alternate === null) {
-      newFiber.flags |= Placement | PlacementDEV;
-    }
-    return newFiber;
-  }
-
-  function placeChildren(firstChildFiber: Fiber | null): void {
-    if (firstChildFiber === null) {
-      return;
-    }
-
-    let updatedFibers: Array<Fiber> | null = null;
-    let updatedFibersOldIndices: Array<number> | null = null;
+  function recalculateMovesPlacement(firstChildFiber: Fiber): void {
+    const updatedFibers: Array<Fiber> = [];
+    const updatedFibersOldIndices: Array<number> = [];
 
     let nextFiber: Fiber | null = firstChildFiber;
     while (nextFiber !== null) {
-      if (!shouldTrackSideEffects) {
-        // During hydration, the useId algorithm needs to know which fibers are
-        // part of a list of children (arrays, iterators).
-        nextFiber.flags |= Forked;
-        nextFiber = nextFiber.sibling;
-        continue;
-      }
-
       const oldFiber = nextFiber.alternate;
       if (oldFiber !== null) {
-        // This is an update. Defer placement calculation.
-        (updatedFibers || (updatedFibers = [])).push(nextFiber);
-        (updatedFibersOldIndices || (updatedFibersOldIndices = [])).push(
-          oldFiber.index,
-        );
-      } else {
-        // This is an insertion.
-        nextFiber.flags |= Placement | PlacementDEV;
+        // We will recalculate placement for all updated fibers.
+        if (nextFiber.flags & Placement) {
+          nextFiber.flags &= ~(Placement | PlacementDEV);
+        }
+        updatedFibers.push(nextFiber);
+        updatedFibersOldIndices.push(oldFiber.index);
       }
-
       nextFiber = nextFiber.sibling;
-    }
-
-    if (
-      updatedFibers === null ||
-      updatedFibersOldIndices === null || // make flow happy
-      updatedFibers.length <= 1
-    ) {
-      // No updated fibers or only one. A single updated fiber can stay,
-      // because it's either a single child or all other children are insertions
-      // and will be placed around it appropriately during commit.
-      return;
     }
 
     // Now that we have updated fibers old indices in the order they appear in the
@@ -551,6 +486,78 @@ function createChildReconciler(
       const updatedFiberIdx = updatedFibersIndicesToMarkForPlacement[i];
       updatedFibers[updatedFiberIdx].flags |= Placement | PlacementDEV;
     }
+  }
+
+  function extractMoveCount(packedPlacementContext: number): number {
+    // Last 2 bits are reserved for tracking move count up to a max of 3.
+    return packedPlacementContext & 0b11;
+  }
+
+  function extractLastPlacedIndex(packedPlacementContext: number): number {
+    // Remaining bits are reserved for tracking last placed index.
+    // Cannot use bitwise operation since it will truncate the number to 32 bits.
+    return Math.floor(packedPlacementContext / 4);
+  }
+
+  function packPlacementContext(
+    lastPlacedIndex: number,
+    moveCount: number,
+  ): number {
+    // We will track move count up to a max of 3.
+    return lastPlacedIndex * 4 + (moveCount > 3 ? 3 : moveCount);
+  }
+
+  function placeChild(
+    newFiber: Fiber,
+    packedPlacementContext: number,
+    newIndex: number,
+  ): number {
+    newFiber.index = newIndex;
+    if (!shouldTrackSideEffects) {
+      // During hydration, the useId algorithm needs to know which fibers are
+      // part of a list of children (arrays, iterators).
+      newFiber.flags |= Forked;
+      return packedPlacementContext;
+    }
+    const current = newFiber.alternate;
+    if (current !== null) {
+      const oldIndex = current.index;
+
+      if (enableGranularChildrenMoves) {
+        const lastPlacedIndex = extractLastPlacedIndex(packedPlacementContext);
+        const moveCount = extractMoveCount(packedPlacementContext);
+        if (oldIndex < lastPlacedIndex) {
+          // This is a move.
+          newFiber.flags |= Placement | PlacementDEV;
+          return packPlacementContext(lastPlacedIndex, moveCount + 1);
+        } else {
+          return packPlacementContext(oldIndex, moveCount);
+        }
+      } else {
+        if (oldIndex < packedPlacementContext) {
+          // This is a move.
+          newFiber.flags |= Placement | PlacementDEV;
+
+          return packedPlacementContext;
+        } else {
+          // This item can stay in place.
+          return oldIndex;
+        }
+      }
+    } else {
+      // This is an insertion.
+      newFiber.flags |= Placement | PlacementDEV;
+      return packedPlacementContext;
+    }
+  }
+
+  function placeSingleChild(newFiber: Fiber): Fiber {
+    // This is simpler for the single child case. We only need to do a
+    // placement for inserting new children.
+    if (shouldTrackSideEffects && newFiber.alternate === null) {
+      newFiber.flags |= Placement | PlacementDEV;
+    }
+    return newFiber;
   }
 
   function updateTextNode(
@@ -1205,7 +1212,7 @@ function createChildReconciler(
     let previousNewFiber: Fiber | null = null;
 
     let oldFiber = currentFirstChild;
-    let lastPlacedIndex = 0;
+    let packedPlacementContext = 0;
     let newIdx = 0;
     let nextOldFiber = null;
     for (; oldFiber !== null && newIdx < newChildren.length; newIdx++) {
@@ -1248,11 +1255,13 @@ function createChildReconciler(
           deleteChild(returnFiber, oldFiber);
         }
       }
-      if (enableGranularChildrenPlacement) {
-        newFiber.index = newIdx;
-      } else {
-        lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
-      }
+
+      packedPlacementContext = placeChild(
+        newFiber,
+        packedPlacementContext,
+        newIdx,
+      );
+
       if (previousNewFiber === null) {
         // TODO: Move out of the loop. This only happens for the first run.
         resultingFirstChild = newFiber;
@@ -1270,8 +1279,13 @@ function createChildReconciler(
     if (newIdx === newChildren.length) {
       // We've reached the end of the new children. We can delete the rest.
       deleteRemainingChildren(returnFiber, oldFiber);
-      if (enableGranularChildrenPlacement) {
-        placeChildren(resultingFirstChild);
+      if (
+        enableGranularChildrenMoves &&
+        shouldTrackSideEffects &&
+        extractMoveCount(packedPlacementContext) > 2 &&
+        resultingFirstChild !== null
+      ) {
+        recalculateMovesPlacement(resultingFirstChild);
       }
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
@@ -1296,11 +1310,13 @@ function createChildReconciler(
             knownKeys,
           );
         }
-        if (enableGranularChildrenPlacement) {
-          newFiber.index = newIdx;
-        } else {
-          lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
-        }
+
+        packedPlacementContext = placeChild(
+          newFiber,
+          packedPlacementContext,
+          newIdx,
+        );
+
         if (previousNewFiber === null) {
           // TODO: Move out of the loop. This only happens for the first run.
           resultingFirstChild = newFiber;
@@ -1309,8 +1325,13 @@ function createChildReconciler(
         }
         previousNewFiber = newFiber;
       }
-      if (enableGranularChildrenPlacement) {
-        placeChildren(resultingFirstChild);
+      if (
+        enableGranularChildrenMoves &&
+        shouldTrackSideEffects &&
+        extractMoveCount(packedPlacementContext) &&
+        resultingFirstChild !== null
+      ) {
+        recalculateMovesPlacement(resultingFirstChild);
       }
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
@@ -1351,11 +1372,13 @@ function createChildReconciler(
             );
           }
         }
-        if (enableGranularChildrenPlacement) {
-          newFiber.index = newIdx;
-        } else {
-          lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
-        }
+
+        packedPlacementContext = placeChild(
+          newFiber,
+          packedPlacementContext,
+          newIdx,
+        );
+
         if (previousNewFiber === null) {
           resultingFirstChild = newFiber;
         } else {
@@ -1370,8 +1393,13 @@ function createChildReconciler(
       // to add them to the deletion list.
       existingChildren.forEach(child => deleteChild(returnFiber, child));
     }
-    if (enableGranularChildrenPlacement) {
-      placeChildren(resultingFirstChild);
+    if (
+      enableGranularChildrenMoves &&
+      shouldTrackSideEffects &&
+      extractMoveCount(packedPlacementContext) &&
+      resultingFirstChild !== null
+    ) {
+      recalculateMovesPlacement(resultingFirstChild);
     }
     if (getIsHydrating()) {
       const numberOfForks = newIdx;
@@ -1516,7 +1544,7 @@ function createChildReconciler(
     let previousNewFiber: Fiber | null = null;
 
     let oldFiber = currentFirstChild;
-    let lastPlacedIndex = 0;
+    let packedPlacementContext = 0;
     let newIdx = 0;
     let nextOldFiber = null;
 
@@ -1562,11 +1590,13 @@ function createChildReconciler(
           deleteChild(returnFiber, oldFiber);
         }
       }
-      if (enableGranularChildrenPlacement) {
-        newFiber.index = newIdx;
-      } else {
-        lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
-      }
+
+      packedPlacementContext = placeChild(
+        newFiber,
+        packedPlacementContext,
+        newIdx,
+      );
+
       if (previousNewFiber === null) {
         // TODO: Move out of the loop. This only happens for the first run.
         resultingFirstChild = newFiber;
@@ -1584,8 +1614,13 @@ function createChildReconciler(
     if (step.done) {
       // We've reached the end of the new children. We can delete the rest.
       deleteRemainingChildren(returnFiber, oldFiber);
-      if (enableGranularChildrenPlacement) {
-        placeChildren(resultingFirstChild);
+      if (
+        enableGranularChildrenMoves &&
+        shouldTrackSideEffects &&
+        extractMoveCount(packedPlacementContext) &&
+        resultingFirstChild !== null
+      ) {
+        recalculateMovesPlacement(resultingFirstChild);
       }
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
@@ -1610,11 +1645,13 @@ function createChildReconciler(
             knownKeys,
           );
         }
-        if (enableGranularChildrenPlacement) {
-          newFiber.index = newIdx;
-        } else {
-          lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
-        }
+
+        packedPlacementContext = placeChild(
+          newFiber,
+          packedPlacementContext,
+          newIdx,
+        );
+
         if (previousNewFiber === null) {
           // TODO: Move out of the loop. This only happens for the first run.
           resultingFirstChild = newFiber;
@@ -1623,8 +1660,13 @@ function createChildReconciler(
         }
         previousNewFiber = newFiber;
       }
-      if (enableGranularChildrenPlacement) {
-        placeChildren(resultingFirstChild);
+      if (
+        enableGranularChildrenMoves &&
+        shouldTrackSideEffects &&
+        extractMoveCount(packedPlacementContext) &&
+        resultingFirstChild !== null
+      ) {
+        recalculateMovesPlacement(resultingFirstChild);
       }
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
@@ -1665,11 +1707,13 @@ function createChildReconciler(
             );
           }
         }
-        if (enableGranularChildrenPlacement) {
-          newFiber.index = newIdx;
-        } else {
-          lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
-        }
+
+        packedPlacementContext = placeChild(
+          newFiber,
+          packedPlacementContext,
+          newIdx,
+        );
+
         if (previousNewFiber === null) {
           resultingFirstChild = newFiber;
         } else {
@@ -1684,8 +1728,13 @@ function createChildReconciler(
       // to add them to the deletion list.
       existingChildren.forEach(child => deleteChild(returnFiber, child));
     }
-    if (enableGranularChildrenPlacement) {
-      placeChildren(resultingFirstChild);
+    if (
+      enableGranularChildrenMoves &&
+      shouldTrackSideEffects &&
+      (packedPlacementContext & 0b11) > 2 &&
+      resultingFirstChild !== null
+    ) {
+      recalculateMovesPlacement(resultingFirstChild);
     }
     if (getIsHydrating()) {
       const numberOfForks = newIdx;

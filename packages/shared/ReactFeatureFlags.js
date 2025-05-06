@@ -106,8 +106,9 @@ export const enableHydrationChangeEvent = __EXPERIMENTAL__;
 
 export const enableDefaultTransitionIndicator = __EXPERIMENTAL__;
 export const enableGranularChildrenPlacement = false;
+export const enableGranularChildrenMoves = true;
 
-export const enablePlacementCommitCache = false;
+export const enableChildrenTerminalPlacementTracking = true;
 
 /**
  * Switches the Fabric API from doing layout in commit work instead of complete work.

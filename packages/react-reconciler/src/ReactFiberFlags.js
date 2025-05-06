@@ -63,6 +63,9 @@ export const ForceUpdateForLegacySuspense = /* */ 0b0000000000000100000000000000
 export const DidPropagateContext = /*          */ 0b0000000000001000000000000000000;
 export const NeedsPropagation = /*             */ 0b0000000000010000000000000000000;
 export const Forked = /*                       */ 0b0000000000100000000000000000000;
+// Transient flag used on parent fibers during commit to indicate that all remaining
+// children of a parent can be placed at the end of the list.
+export const ChildrenTerminalPlacement = Forked;
 
 // Static tags describe aspects of a fiber that are not specific to a render,
 // e.g. a fiber uses a passive effect (even if there are no updates on this particular render).

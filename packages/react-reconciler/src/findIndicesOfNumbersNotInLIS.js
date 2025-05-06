@@ -24,6 +24,7 @@
 // returns [2 (index of 8), 0 (index of 4)]
 // Note: indices of non-lis numbers will be returned in reverse order
 // because we traverse the original array backwards to recover it.
+/** @noinline */
 export default function findIndicesOfNumbersNotInLIS(
   numbers: Array<number>,
 ): Array<number> {
