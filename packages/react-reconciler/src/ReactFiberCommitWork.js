@@ -62,8 +62,7 @@ import {
   enableFragmentRefs,
   enableEagerAlternateStateNodeCleanup,
   enableDefaultTransitionIndicator,
-  enablePlacementCommitCache,
-  enableChildrenTerminalPlacementTracking,
+  enableTerminalChildrenPlacementTracking,
 } from 'shared/ReactFeatureFlags';
 import {
   FunctionComponent,
@@ -119,7 +118,7 @@ import {
   DidCapture,
   AffectedParentLayout,
   ViewTransitionNamedStatic,
-  ChildrenTerminalPlacement,
+  TerminalChildrenPlacement,
 } from './ReactFiberFlags';
 import {
   commitStartTime,
@@ -1942,7 +1941,7 @@ export function commitMutationEffects(
   rootViewTransitionAffected = false;
 
   resetComponentEffectTimers();
-  commitMutationEffectsOnFiber(finishedWork, root, committedLanes, null);
+  commitMutationEffectsOnFiber(finishedWork, root, committedLanes);
 
   inProgressLanes = null;
   inProgressRoot = null;
@@ -1967,13 +1966,16 @@ function recursivelyTraverseMutationEffects(
     parentFiber.subtreeFlags &
     (enablePersistedModeClonedFlag ? MutationMask | Cloned : MutationMask)
   ) {
+    if (enableTerminalChildrenPlacementTracking) {
+      parentFiber.flags &= ~TerminalChildrenPlacement;
+    }
     let child = parentFiber.child;
     while (child !== null) {
       commitMutationEffectsOnFiber(child, root, lanes);
       child = child.sibling;
     }
-    if (enableChildrenTerminalPlacementTracking) {
-      parentFiber.flags &= ~ChildrenTerminalPlacement;
+    if (enableTerminalChildrenPlacementTracking) {
+      parentFiber.flags &= ~TerminalChildrenPlacement;
     }
   }
 }

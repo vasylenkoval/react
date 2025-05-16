@@ -86,15 +86,12 @@ export const enableScrollEndPolyfill = true;
 export const enableSuspenseyImages = false;
 export const enableFizzBlockingRender = true;
 export const enableSrcObject = false;
-<<<<<<< HEAD
 export const enableHydrationChangeEvent = false;
 export const enableDefaultTransitionIndicator = false;
 
-=======
->>>>>>> dff420f35 (Add feature flags for granular children placement and placement commit cache. Also refactor placement commit cache to be passed through arguments.)
 export const enableFragmentRefs = false;
 export const enableGranularChildrenMoves = true;
-export const enableChildrenTerminalPlacementTracking = true;
+export const enableTerminalChildrenPlacementTracking = true;
 export const ownerStackLimit = 1e4;
 
 // Flow magic to verify the exports of this file match the original version.

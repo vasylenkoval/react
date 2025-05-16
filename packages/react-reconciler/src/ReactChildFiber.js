@@ -450,7 +450,7 @@ function createChildReconciler(
     return clone;
   }
 
-  function recalculateMovesPlacement(firstChildFiber: Fiber): void {
+  function recalculateUpdatedChildrenPlacement(firstChildFiber: Fiber): void {
     const updatedFibers: Array<Fiber> = [];
     const updatedFibersOldIndices: Array<number> = [];
 
@@ -488,8 +488,15 @@ function createChildReconciler(
     }
   }
 
+  function packPlacementContext(
+    lastPlacedIndex: number,
+    moveCount: number,
+  ): number {
+    // Last two bits are reserved for tracking move count up to a max of 3.
+    return lastPlacedIndex * 4 + (moveCount > 3 ? 3 : moveCount);
+  }
+
   function extractMoveCount(packedPlacementContext: number): number {
-    // Last 2 bits are reserved for tracking move count up to a max of 3.
     return packedPlacementContext & 0b11;
   }
 
@@ -497,14 +504,6 @@ function createChildReconciler(
     // Remaining bits are reserved for tracking last placed index.
     // Cannot use bitwise operation since it will truncate the number to 32 bits.
     return Math.floor(packedPlacementContext / 4);
-  }
-
-  function packPlacementContext(
-    lastPlacedIndex: number,
-    moveCount: number,
-  ): number {
-    // We will track move count up to a max of 3.
-    return lastPlacedIndex * 4 + (moveCount > 3 ? 3 : moveCount);
   }
 
   function placeChild(
@@ -1282,10 +1281,10 @@ function createChildReconciler(
       if (
         enableGranularChildrenMoves &&
         shouldTrackSideEffects &&
-        extractMoveCount(packedPlacementContext) > 2 &&
-        resultingFirstChild !== null
+        resultingFirstChild !== null &&
+        extractMoveCount(packedPlacementContext) > 2
       ) {
-        recalculateMovesPlacement(resultingFirstChild);
+        recalculateUpdatedChildrenPlacement(resultingFirstChild);
       }
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
@@ -1328,10 +1327,10 @@ function createChildReconciler(
       if (
         enableGranularChildrenMoves &&
         shouldTrackSideEffects &&
-        extractMoveCount(packedPlacementContext) &&
-        resultingFirstChild !== null
+        resultingFirstChild !== null &&
+        extractMoveCount(packedPlacementContext) > 2
       ) {
-        recalculateMovesPlacement(resultingFirstChild);
+        recalculateUpdatedChildrenPlacement(resultingFirstChild);
       }
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
@@ -1396,10 +1395,10 @@ function createChildReconciler(
     if (
       enableGranularChildrenMoves &&
       shouldTrackSideEffects &&
-      extractMoveCount(packedPlacementContext) &&
-      resultingFirstChild !== null
+      resultingFirstChild !== null &&
+      extractMoveCount(packedPlacementContext) > 2
     ) {
-      recalculateMovesPlacement(resultingFirstChild);
+      recalculateUpdatedChildrenPlacement(resultingFirstChild);
     }
     if (getIsHydrating()) {
       const numberOfForks = newIdx;
@@ -1617,10 +1616,10 @@ function createChildReconciler(
       if (
         enableGranularChildrenMoves &&
         shouldTrackSideEffects &&
-        extractMoveCount(packedPlacementContext) &&
-        resultingFirstChild !== null
+        resultingFirstChild !== null &&
+        extractMoveCount(packedPlacementContext) > 2
       ) {
-        recalculateMovesPlacement(resultingFirstChild);
+        recalculateUpdatedChildrenPlacement(resultingFirstChild);
       }
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
@@ -1663,10 +1662,10 @@ function createChildReconciler(
       if (
         enableGranularChildrenMoves &&
         shouldTrackSideEffects &&
-        extractMoveCount(packedPlacementContext) &&
-        resultingFirstChild !== null
+        resultingFirstChild !== null &&
+        extractMoveCount(packedPlacementContext) > 2
       ) {
-        recalculateMovesPlacement(resultingFirstChild);
+        recalculateUpdatedChildrenPlacement(resultingFirstChild);
       }
       if (getIsHydrating()) {
         const numberOfForks = newIdx;
@@ -1731,10 +1730,10 @@ function createChildReconciler(
     if (
       enableGranularChildrenMoves &&
       shouldTrackSideEffects &&
-      (packedPlacementContext & 0b11) > 2 &&
-      resultingFirstChild !== null
+      resultingFirstChild !== null &&
+      extractMoveCount(packedPlacementContext) > 2
     ) {
-      recalculateMovesPlacement(resultingFirstChild);
+      recalculateUpdatedChildrenPlacement(resultingFirstChild);
     }
     if (getIsHydrating()) {
       const numberOfForks = newIdx;

@@ -105,15 +105,10 @@ export const enableSrcObject = __EXPERIMENTAL__;
 export const enableHydrationChangeEvent = __EXPERIMENTAL__;
 
 export const enableDefaultTransitionIndicator = __EXPERIMENTAL__;
-export const enableGranularChildrenPlacement = false;
+
 export const enableGranularChildrenMoves = true;
 
-export const enableChildrenTerminalPlacementTracking = true;
-
-/**
- * Switches the Fabric API from doing layout in commit work instead of complete work.
- */
-export const enableFabricCompleteRootInCommitPhase = false;
+export const enableTerminalChildrenPlacementTracking = true;
 
 /**
  * Switches Fiber creation to a simple object instead of a constructor.

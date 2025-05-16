@@ -29,7 +29,7 @@ import {
   Fragment,
 } from './ReactWorkTags';
 import {
-  ChildrenTerminalPlacement,
+  TerminalChildrenPlacement,
   ContentReset,
   Placement,
 } from './ReactFiberFlags';
@@ -70,7 +70,7 @@ import {trackHostMutation} from './ReactFiberMutationTracking';
 import {runWithFiberInDEV} from './ReactCurrentFiber';
 import {
   enableFragmentRefs,
-  enableChildrenTerminalPlacementTracking,
+  enableTerminalChildrenPlacementTracking,
 } from 'shared/ReactFeatureFlags';
 
 export function commitHostMount(finishedWork: Fiber) {
@@ -319,12 +319,12 @@ function isFragmentInstanceParent(fiber: Fiber): boolean {
 }
 
 function getHostSibling(fiber: Fiber): ?Instance {
-  if (enableChildrenTerminalPlacementTracking) {
-    // If the parent was flagged as ChildrenTerminalPlacement, it means that we already performed this
-    // search and it returned null. We can skip it.
+  if (enableTerminalChildrenPlacementTracking) {
+    // If the parent was flagged as TerminalChildrenPlacement, it means that we already
+    // did this search and did not find a stable host sibling. We can skip this search.
     if (
       fiber.return !== null &&
-      fiber.return.flags & ChildrenTerminalPlacement
+      fiber.return.flags & TerminalChildrenPlacement
     ) {
       return null;
     }
@@ -341,13 +341,13 @@ function getHostSibling(fiber: Fiber): ?Instance {
         // If we pop out of the root or hit the parent the fiber we are the
         // last sibling.
         if (
-          enableChildrenTerminalPlacementTracking &&
-          node.return !== null &&
-          !(node.return.flags & ChildrenTerminalPlacement)
+          enableTerminalChildrenPlacementTracking &&
+          fiber.return !== null &&
+          !(fiber.return.flags & TerminalChildrenPlacement)
         ) {
-          // Mark this parent as having a terminal placement. This means that we
-          // can skip the search next time.
-          node.return.flags |= ChildrenTerminalPlacement;
+          // Mark this parent as having terminal placement for the remaining children.
+          // This will allow to skip the search next time.
+          fiber.return.flags |= TerminalChildrenPlacement;
         }
         return null;
       }
